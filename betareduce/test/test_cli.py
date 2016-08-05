@@ -34,20 +34,21 @@ class TestRun(object):
         """
         calls = []
 
-        def fake_create(fileobj, requirements, root,
+        def fake_create(fileobj, requirements, fqpn, root,
                         exclude_extension_modules):
-            calls.append((fileobj, requirements, root,
+            calls.append((fileobj, requirements, fqpn, root,
                           exclude_extension_modules))
         return fake_create, calls
 
-    @pytest.mark.parametrize("outfile,requirements", [
-        ("outfile", ["requirement1"]),
-        ("outfile", ["requirement1", "requirement2"]),
+    @pytest.mark.parametrize("outfile,fqpn,requirements", [
+        ("outfile", "package.module.callable", ["requirement1"]),
+        ("outfile", "package.module.callable", ["requirement1",
+                                                "requirement2"]),
     ])
     def test_outfile_and_requirements(self,
                                       make_fake_open_and_calls,
                                       fake_create_and_calls,
-                                      outfile, requirements):
+                                      outfile, fqpn, requirements):
         """
         :py:func:`betareduce._core.run` extracts the desired outfile
         and requirements from the command line.
@@ -55,12 +56,12 @@ class TestRun(object):
         fake_open, open_calls = make_fake_open_and_calls("file")
         fake_create, create_calls = fake_create_and_calls
 
-        C.run(_argv=[outfile] + requirements,
+        C.run(_argv=[outfile, fqpn, ] + requirements,
               _open=fake_open,
               _create=fake_create)
 
         assert open_calls == [(outfile, 'wb')]
-        assert create_calls == [("file", requirements, None, True)]
+        assert create_calls == [("file", requirements, fqpn, None, True)]
 
     @pytest.mark.parametrize("staging_flag", [
         "--staging-directory", "-d",
@@ -76,11 +77,13 @@ class TestRun(object):
         fake_open, open_calls = make_fake_open_and_calls("file")
         fake_create, create_calls = fake_create_and_calls
 
-        C.run(_argv=["outfile", "requirement", staging_flag, "staging"],
+        C.run(_argv=["outfile", "fqpn.callable",
+                     "requirement", staging_flag, "staging"],
               _open=fake_open,
               _create=fake_create)
 
-        assert create_calls == [("file", ["requirement"], "staging", True)]
+        assert create_calls == [
+            ("file", ["requirement"], "fqpn.callable", "staging", True)]
 
     @pytest.mark.parametrize("allow_extensions_flag", [
         [], ["--allow-extension"], ["-a"],
@@ -96,13 +99,14 @@ class TestRun(object):
         fake_open, open_calls = make_fake_open_and_calls("file")
         fake_create, create_calls = fake_create_and_calls
 
-        C.run(_argv=["outfile", "requirement"] + allow_extensions_flag,
+        C.run(_argv=["outfile", "fqpn.callable", "requirement"] +
+              allow_extensions_flag,
               _open=fake_open,
               _create=fake_create)
 
         extension_allowed = not allow_extensions_flag
         assert create_calls == [
-            ("file", ["requirement"], None, extension_allowed),
+            ("file", ["requirement"], "fqpn.callable", None, extension_allowed),
         ]
 
     @pytest.mark.parametrize("quiet_flag", [
@@ -123,7 +127,7 @@ class TestRun(object):
         monkeypatch.setattr(logging, "root",
                             logging.RootLogger(logging.WARNING))
 
-        C.run(_argv=["outfile", "requirement"] + quiet_flag,
+        C.run(_argv=["outfile", "fqpn.callable", "requirement"] + quiet_flag,
               _open=fake_open,
               _create=fake_create)
 

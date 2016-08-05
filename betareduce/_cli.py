@@ -9,6 +9,9 @@ parser = argparse.ArgumentParser(description="Create AWS Lambda package.")
 
 parser.add_argument('outfile',
                     help='the name of the package.')
+parser.add_argument('fqpn',
+                    help='The Fully Qualified Path Name (FQPN) specifying the'
+                    'handler function.')
 parser.add_argument('requirements', nargs='+',
                     help='install requirements to pass through to pip')
 parser.add_argument('-d', '--staging-directory',
@@ -33,5 +36,6 @@ def run(_argv=sys.argv[1:], _open=open, _create=create):
     with _open(args.outfile, 'wb') as fileobj:
         _create(fileobj,
                 args.requirements,
+                fqpn=args.fqpn,
                 root=args.staging_directory,
                 exclude_extension_modules=not args.allow_extensions)

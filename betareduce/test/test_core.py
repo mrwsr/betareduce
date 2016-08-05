@@ -4,6 +4,10 @@ from .. import _core as C
 import os
 import pytest
 import subprocess
+import tokenize
+import re
+
+_IS_IDENTIFIER = re.compile(tokenize.Name + '$')
 
 
 Call = namedtuple('Call', 'args kwargs')
@@ -40,6 +44,7 @@ class RecordsFakeZipFile(object):
     def __init__(self):
         self.init_calls = []
         self.write_calls = []
+        self.writestr_calls = []
 
 
 class FakeZipFile(object):
@@ -58,6 +63,18 @@ class FakeZipFile(object):
         self._recorder.write_calls.append(Call(args=(filename, arcname),
                                                kwargs={}))
 
+    def writestr(self, filename, body):
+        self._recorder.writestr_calls.append(Call(args=(filename, body),
+                                                  kwargs={}))
+
+
+@pytest.fixture
+def fqpn():
+    """
+    A Fully Qualified Path Name
+    """
+    return "package.module.callable"
+
 
 class TestLambdaPackage(object):
     """
@@ -65,8 +82,8 @@ class TestLambdaPackage(object):
     """
 
     @pytest.fixture
-    def package(self, tmpdir):
-        return C.LambdaPackage(str(tmpdir))
+    def package(self, tmpdir, fqpn):
+        return C.LambdaPackage(str(tmpdir), fqpn)
 
     @pytest.fixture(params=C.LambdaPackage.BINARY_SUFFIXES)
     def fake_os_walk(self, request):
@@ -208,13 +225,65 @@ class TestLambdaPackage(object):
         (os.path.join(FAKE_ROOT, "bar", "..", "baz"), "baz"),
 
     ])
-    def test_relativize_path(self, input_path, output_path):
+    def test_relativize_path(self, fqpn, input_path, output_path):
         """
-        :py:meth:`betareduce._core.LambdaPackage.relativize_path` removes the
-        ``self.root`` prefix from a path and any leading slashes.
+        :py:meth:`betareduce._core.LambdaPackage.relativize_path`
+        removes the ``self.root`` prefix from a path and any leading
+        slashes.
         """
-        package = C.LambdaPackage(self.FAKE_ROOT)
+        package = C.LambdaPackage(self.FAKE_ROOT, fqpn)
         assert package.relativize_path(input_path) == output_path
+
+    @pytest.mark.parametrize('invalid_fqpn', [
+        '',
+        '.blah',
+        '.blah.blah',
+        '.blah.blah.',
+        'blah.blah.',
+    ])
+    def test_split_fqpn_invalid_fqpn(self, package, invalid_fqpn):
+        """
+        :py:meth:`betareduce._core.LambdaPackage.split_fqpn` raises
+        :py:exc:`ValueError` when given an invalid fqpn.
+        """
+        with pytest.raises(ValueError):
+            package.split_fqpn(invalid_fqpn)
+
+    @pytest.mark.parametrize('valid_fqpn,split', [
+        ('module.callable', ('module', 'callable')),
+        ('package.module.callable', ('package.module', 'callable'))
+    ])
+    def test_split_fqpn_valid_fqpn(self, package, valid_fqpn, split):
+        """
+        :py:meth:`betareduce._core.LambdaPackage.split_fqpn` splits
+        valid FQPNs.
+        """
+        assert package.split_fqpn(valid_fqpn) == split
+
+    @pytest.mark.parametrize('valid_fqpn', [
+        'module',
+        'package.module',
+        'package._module',
+    ])
+    def test_fqpn_to_lambda_module_name(self, package, valid_fqpn):
+        """
+        :py:meth:`betareduce._core.LambdaPackage.fqpn_to_lambda_module_name`
+        converts module FQPNs to importable names.
+        """
+        transformed = package.fqpn_to_lambda_module_name(valid_fqpn)
+        assert _IS_IDENTIFIER.match(transformed)
+
+    def test_generate_lambda_handler_module(self, package):
+        """
+        :py:meth:`betareduce._core.LambdaPackage.generate_lambda_handler_module`
+        generates Python source that imports the callable specified by
+        the FQPN.
+        """
+        from os.path import isfile
+        source = package.generate_lambda_handler_module('os.path', 'isfile')
+        exec_variables = {}
+        exec(source, exec_variables, exec_variables)
+        assert exec_variables.get('isfile') is isfile
 
     @pytest.fixture
     def fake_zipfile_and_recorder(self):
@@ -274,6 +343,12 @@ class TestLambdaPackage(object):
 
         assert recorder.write_calls == expected
 
+        assert recorder.writestr_calls == [
+            Call(args=("package_module.py",
+                       "from package.module import callable\n"),
+                 kwargs={}),
+        ]
+
     def test_to_zipfile_filter(self,
                                package,
                                make_fake_files,
@@ -305,6 +380,12 @@ class TestLambdaPackage(object):
                            _ZipFile=fake_zip_file.recording__init__)
 
         assert recorder.write_calls == expected
+
+        assert recorder.writestr_calls == [
+            Call(args=("package_module.py",
+                       "from package.module import callable\n"),
+                 kwargs={}),
+        ]
 
 
 class SomeException(Exception):
@@ -430,8 +511,8 @@ class FakeLambdaPackage(object):
     def __init__(self, recorder):
         self._recorder = recorder
 
-    def recording__init__(self, root):
-        self._recorder.init_calls.append(Call(args=(root,), kwargs={}))
+    def recording__init__(self, root, fqpn):
+        self._recorder.init_calls.append(Call(args=(root, fqpn), kwargs={}))
         return self
 
     def install(self, pip_args):
@@ -496,7 +577,8 @@ class TestCreate(object):
     def test_creates_tempdir(self,
                              make_fake_automatic_tempdir_and_calls,
                              fake_passthrough_and_calls,
-                             make_fake_lambda_package_and_recorder):
+                             make_fake_lambda_package_and_recorder,
+                             fqpn):
         """
         :py:func:`betareduce._core.create` creates a temporary
         directory automatically by default.
@@ -509,7 +591,7 @@ class TestCreate(object):
             "zipfileobj")
 
         C.create(
-            "fileobj", ["pip", "args"],
+            "fileobj", ["pip", "args"], fqpn,
             _automatic_tempdir=fake_automatic_tempdir,
             _passthrough=fake_passthrough,
             _LambdaPackage=package.recording__init__)
@@ -517,13 +599,15 @@ class TestCreate(object):
         assert len(automatic_tempdir_calls) == 1
         assert not passthrough_calls
 
-        assert package_recorder.init_calls == [Call(args=("temp",),
+        assert package_recorder.init_calls == [Call(args=("temp",
+                                                          fqpn),
                                                     kwargs={})]
 
     def test_uses_root(self,
                        make_fake_automatic_tempdir_and_calls,
                        fake_passthrough_and_calls,
-                       make_fake_lambda_package_and_recorder):
+                       make_fake_lambda_package_and_recorder,
+                       fqpn):
         """
         :py:func:`betareduce._core.create` uses the directory
         specified by ``root``.
@@ -536,7 +620,7 @@ class TestCreate(object):
             "zipfileobj")
 
         C.create(
-            "fileobj", ["pip", "args"],
+            "fileobj", ["pip", "args"], fqpn,
             root="passed",
             _automatic_tempdir=fake_automatic_tempdir,
             _passthrough=fake_passthrough,
@@ -545,13 +629,14 @@ class TestCreate(object):
         assert not automatic_tempdir_calls
         assert len(passthrough_calls) == 1
 
-        assert package_recorder.init_calls == [Call(args=("passed",),
+        assert package_recorder.init_calls == [Call(args=("passed", fqpn),
                                                     kwargs={})]
 
     def test_exclude_extensions(self,
                                 make_fake_automatic_tempdir_and_calls,
                                 fake_passthrough_and_calls,
-                                make_fake_lambda_package_and_recorder):
+                                make_fake_lambda_package_and_recorder,
+                                fqpn):
         """
         :py:func:`betareduce._core.create` excludes extension modules
         by default.
@@ -564,7 +649,7 @@ class TestCreate(object):
             "zipfileobj")
 
         C.create(
-            "fileobj", ["pip", "args"],
+            "fileobj", ["pip", "args"], fqpn,
             _automatic_tempdir=fake_automatic_tempdir,
             _passthrough=fake_passthrough,
             _LambdaPackage=package.recording__init__)
@@ -576,7 +661,8 @@ class TestCreate(object):
     def test_include_extensions(self,
                                 make_fake_automatic_tempdir_and_calls,
                                 fake_passthrough_and_calls,
-                                make_fake_lambda_package_and_recorder):
+                                make_fake_lambda_package_and_recorder,
+                                fqpn):
         """
         :py:func:`betareduce._core.create` includes extension modules
         when ``exclude_extension_modules`` is :py:class:`False`
@@ -589,7 +675,7 @@ class TestCreate(object):
             "zipfileobj")
 
         C.create(
-            "fileobj", ["pip", "args"],
+            "fileobj", ["pip", "args"], fqpn,
             exclude_extension_modules=False,
             _automatic_tempdir=fake_automatic_tempdir,
             _passthrough=fake_passthrough,
