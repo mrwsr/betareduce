@@ -5,6 +5,7 @@ import logging
 import os
 import subprocess
 import shutil
+import stat
 import tempfile
 import textwrap
 import zipfile
@@ -100,18 +101,6 @@ class LambdaPackage(object):
                 " got %r" % (fqpn))
         return module_name, callable_name
 
-    def fqpn_to_lambda_module_name(self, module_fqpn):
-        """
-        Converts a Fully Qualified Path Name (FQPN) specifying a
-        module that contains the Lambda handler into an importable
-        module name.
-
-        :param module_fqpn: The FQPN specifying the enclosing module
-        :type module_fqpn: :py:class:`str`
-        :return: :py:class:`str`
-        """
-        return module_fqpn.replace('.', '_')
-
     def generate_lambda_handler_module(self, module_fqpn, callable_name):
         """
         Generates Python source to be used in the top-level Lambda
@@ -148,11 +137,14 @@ class LambdaPackage(object):
         :raises ValueError: ...when given an invalid FQPN.
         """
         real_module_name, callable_name = self.split_fqpn(fqpn)
-        module_name = self.fqpn_to_lambda_module_name(real_module_name)
+        module_name = 'lambda_entry'
         filename = module_name + '.py'
         module_source = self.generate_lambda_handler_module(real_module_name,
                                                             callable_name)
-        zip_obj.writestr(filename, module_source)
+        info = zipfile.ZipInfo(filename)
+        info.external_attr = (stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH) << 16
+
+        zip_obj.writestr(info, module_source)
         _logger.info("FPQN for handler function %s now accessible as %s.%s",
                      fqpn, module_name, callable_name)
 

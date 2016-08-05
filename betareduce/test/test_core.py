@@ -63,8 +63,8 @@ class FakeZipFile(object):
         self._recorder.write_calls.append(Call(args=(filename, arcname),
                                                kwargs={}))
 
-    def writestr(self, filename, body):
-        self._recorder.writestr_calls.append(Call(args=(filename, body),
+    def writestr(self, info, body):
+        self._recorder.writestr_calls.append(Call(args=(info, body),
                                                   kwargs={}))
 
 
@@ -260,24 +260,11 @@ class TestLambdaPackage(object):
         """
         assert package.split_fqpn(valid_fqpn) == split
 
-    @pytest.mark.parametrize('valid_fqpn', [
-        'module',
-        'package.module',
-        'package._module',
-    ])
-    def test_fqpn_to_lambda_module_name(self, package, valid_fqpn):
-        """
-        :py:meth:`betareduce._core.LambdaPackage.fqpn_to_lambda_module_name`
-        converts module FQPNs to importable names.
-        """
-        transformed = package.fqpn_to_lambda_module_name(valid_fqpn)
-        assert _IS_IDENTIFIER.match(transformed)
-
     def test_generate_lambda_handler_module(self, package):
         """
         :py:meth:`betareduce._core.LambdaPackage.generate_lambda_handler_module`
         generates Python source that imports the callable specified by
-        the FQPN.
+        the FQPN as ``_impl`` and wraps in the callable ``handler``.
         """
         from os.path import isfile
         source = package.generate_lambda_handler_module('os.path', 'isfile')
@@ -343,11 +330,14 @@ class TestLambdaPackage(object):
 
         assert recorder.write_calls == expected
 
-        assert recorder.writestr_calls == [
-            Call(args=("package_module.py",
-                       "from package.module import callable\n"),
-                 kwargs={}),
-        ]
+        assert len(recorder.writestr_calls) == 1
+        [(args, _)] = recorder.writestr_calls
+        assert len(args) == 2
+        (zip_info, source) = args
+        assert zip_info.filename == 'lambda_entry.py'
+        # all users can only read the file
+        assert zip_info.external_attr == int('0444', 8) << 16
+        assert source == 'from package.module import callable\n'
 
     def test_to_zipfile_filter(self,
                                package,
@@ -381,11 +371,14 @@ class TestLambdaPackage(object):
 
         assert recorder.write_calls == expected
 
-        assert recorder.writestr_calls == [
-            Call(args=("package_module.py",
-                       "from package.module import callable\n"),
-                 kwargs={}),
-        ]
+        assert len(recorder.writestr_calls) == 1
+        [(args, _)] = recorder.writestr_calls
+        assert len(args) == 2
+        (zip_info, source) = args
+        assert zip_info.filename == 'lambda_entry.py'
+        # all users can only read the file
+        assert zip_info.external_attr == int('0444', 8) << 16
+        assert source == 'from package.module import callable\n'
 
 
 class SomeException(Exception):
