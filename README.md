@@ -21,7 +21,7 @@ By default it will remove extension modules (`.so` files) and emit a warning.  T
 ...
 setup.py
 ...
-(betareduce) $ betareduce mypackage.zip /path/to/my/application/package -r /path/to/my/application/package/requirements.txt
+(betareduce) $ betareduce mypackage.zip package.module.function /path/to/my/application/package -r /path/to/my/application/package/requirements.txt
 INFO:betareduce._core:creating temporary directory '/var/folders/vx/9jzwzjds42z75rwj_2w7_4580000gp/T/tmpE1bmP6'
 INFO:betareduce._core:command: ['pip', 'install', '-t', '/var/folders/vx/9jzwzjds42z75rwj_2w7_4580000gp/T/tmpE1bmP6', '/path/to/application/package', '-r', '/path/to/application/package/requirements.txt'], output:
 Processing /path/to/application/package
@@ -31,6 +31,7 @@ Installing collected packages: foo, ...
 Successfully installed foo, ...
 
 INFO:betareduce._core:Detected extension module: /var/folders/vx/9jzwzjds42z75rwj_2w7_4580000gp/T/tmpE1bmP6/simplejson/_speedups.so
+INFO:betareduce._core:FPQN for handler function package.module.function now accessible as lambda_entry.function
 INFO:betareduce._core:removing temporary directory '/var/folders/vx/9jzwzjds42z75rwj_2w7_4580000gp/T/tmpE1bmP6'
 (betareduce) $ file mypackage.zip
 replication_lag_monitor.zip: Zip archive data, at least v2.0 to extract
